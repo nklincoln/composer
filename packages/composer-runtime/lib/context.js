@@ -27,6 +27,7 @@ const ResourceManager = require('./resourcemanager');
 const Resolver = require('./resolver');
 const ScriptCompiler = require('./scriptcompiler');
 const TransactionLogger = require('./transactionlogger');
+const ModelUtil = require('composer-common').ModelUtil;
 
 const LOG = Logger.getLog('Context');
 
@@ -34,6 +35,10 @@ const businessNetworkCache = LRU(8);
 const compiledScriptBundleCache = LRU(8);
 const compiledQueryBundleCache = LRU(8);
 const compiledAclBundleCache = LRU(8);
+const ruleCache = LRU(8);
+
+const INCLUDE_SYSTEM = true;
+const EXCLUDE_SYSTEM = false;
 
 /**
  * A class representing the current request being handled by the JavaScript engine.
@@ -134,6 +139,32 @@ class Context {
     }
 
     /**
+     * Get a compiled ACL bundle from the cache.
+     * @param {string} businessNetworkHash The hash of the business network definition.
+     * @return {CompiledAclBundle} The cached compiled ACL bundle, or null if
+     * there is no entry in the cache for the specified business network definition.
+     */
+    static getRules(businessNetworkHash) {
+        const method = 'getRules';
+        LOG.entry(method, businessNetworkHash);
+        const result = ruleCache.get(businessNetworkHash);
+        LOG.exit(method, result);
+        return result;
+    }
+
+    /**
+     * Store a compiled ACL bundle in the cache.
+     * @param {string} businessNetworkHash The hash of the business network definition.
+     * @param {Map} rules The rules map.
+     */
+    static cacheRules(businessNetworkHash, rules) {
+        const method = 'cacheRules';
+        LOG.entry(method, businessNetworkHash, rules);
+        ruleCache.set(businessNetworkHash, rules);
+        LOG.exit(method);
+    }
+
+    /**
      * Constructor.
      * @param {Engine} engine The chaincode engine that owns this context.
      */
@@ -159,6 +190,7 @@ class Context {
         this.aclCompiler = null;
         this.compiledAclBundle = null;
         this.loggingService = null;
+        this.ruleMap = null;
     }
 
     /**
@@ -317,6 +349,36 @@ class Context {
                 Context.cacheCompiledAclBundle(businessNetworkRecord.hash, compiledAclBundle);
                 LOG.exit(method, compiledAclBundle);
                 return compiledAclBundle;
+            })
+            .catch((error) => {
+                LOG.error(method, error);
+                throw error;
+            });
+    }
+
+    /**
+     * Load or build the rules.
+     * @param {Object} businessNetworkRecord The business network record.
+     * @param {BusinessNetworkDefinition} businessNetworkDefinition The business network definition.
+     * @return {Promise} A promise that will be resolved with a {@link BusinessNetworkDefinition}
+     * when complete, or rejected with an error.
+     */
+    loadRules(businessNetworkRecord, businessNetworkDefinition) {
+        const method = 'loadRules';
+        LOG.entry(method);
+        LOG.debug(method, 'Looking in cache for rules', businessNetworkRecord.hash);
+        let rules = Context.getRules(businessNetworkRecord.hash);
+        if (rules) {
+            LOG.debug(method, 'rules is in cache');
+            return Promise.resolve(rules);
+        }
+        LOG.debug(method, 'rules not in cache, building');
+        return Promise.resolve()
+            .then(() => {
+                let rules = this.buildAccessMap(this.businessNetworkDefinition);
+                Context.cacheRules(businessNetworkRecord.hash, rules);
+                LOG.exit(method, rules);
+                return Promise.resolve(rules);
             })
             .catch((error) => {
                 LOG.error(method, error);
@@ -502,6 +564,215 @@ class Context {
     }
 
     /**
+     * Get the compiled ACL bundle to use.
+     * @param {BusinessNetworkDefinition} businessNetworkDefinition The business network definition to use.
+     * @param {Object} [options] The options to use.
+     * @param {CompiledAclBundle} [options.ruleMap] The business network definition to use.
+     * @return {Promise} A promise that will be resolved when complete, or rejected
+     * with an error.
+     */
+    findRules(businessNetworkDefinition, options) {
+        const method = 'findRules';
+        LOG.entry(method, options);
+        options = options || {};
+        return Promise.resolve()
+            .then(() => {
+                if (options.businessNetworkDefinition) {
+                    LOG.debug(method, 'rule map already specified');
+                    return Promise.resolve(this.buildAccessMap(options.businessNetworkDefinition));
+                } else {
+                    LOG.debug(method, 'Compiled ACL bundle not specified, loading from world state');
+                    return this.loadBusinessNetworkRecord()
+                        .then((businessNetworkRecord) => {
+                            return this.loadRules(businessNetworkRecord, businessNetworkDefinition);
+                        });
+                }
+            })
+            .then((rules) => {
+                LOG.exit(method, rules);
+                return rules;
+            });
+    }
+
+    /**
+    * Generate a Lookup table for the defined business network ACL rules
+    * @param {bn} businessNetwork businessNetwork
+    * @return {Map} rule map
+    */
+    buildAccessMap(businessNetwork) {
+
+        let map = new Map();
+
+        businessNetwork.getAclManager().getAclRules().forEach((rule) => {
+            if (rule.getParticipant() === null) {
+                // Then 'ALL' condition specified - Rule applied to all Participant.Type(s)
+                businessNetwork.getModelManager()
+                .getParticipantDeclarations(EXCLUDE_SYSTEM).forEach((participantDeclaration) => {
+                    let participant = participantDeclaration.getModelFile().getNamespace() + '.' + participantDeclaration.getName();
+                    if (map.has(participant)) {
+                        // Need to augment
+                        let existingRules = map.has(rule.getParticipant());
+                        map.set(participant, this.buildParticipantRules(participantDeclaration, rule, existingRules, businessNetwork.getModelManager()));
+                    } else {
+                        // Create new
+                        map.set(participant, this.buildParticipantRules(participantDeclaration, rule, null, businessNetwork.getModelManager()));
+                    }
+                });
+            } else {
+                // Named ParticipantType, or named ParticipantType#Instance
+                let participant = rule.getParticipant().getFullyQualifiedName();
+                if (map.has(participant)) {
+                    // Need to augment
+                    let existingRules = map.has(rule.getParticipant());
+                    map.set(participant, this.buildParticipantRules(rule.getParticipant(), rule, existingRules, businessNetwork.getModelManager()));
+                } else {
+                    // Create new
+                    map.set(participant, this.buildParticipantRules(rule.getParticipant(), rule, null, businessNetwork.getModelManager()));
+                }
+            }
+        });
+
+        return map;
+
+    }
+
+    /**
+     * Build a permissions map for a specified Participant
+     * @param {Resource} participant The Participant from the Business Network being considered
+     * @param {ACLRule} rule The Participant rule being condsidered
+     * @param {Map} existing The existing rules for the participant
+     * @param {modelmanager} modelManager model manager
+     * @return {Promise} A promise that will be resolved when complete, or rejected
+     * with an error.
+     */
+    buildParticipantRules(participant, rule, existing, modelManager) {
+        let participantMap = new Map();
+
+        if (!rule.getTransaction()) {
+            if (participantMap.has('empty')) {
+                participantMap.set('empty', this.extendResourceRules(rule));
+            } else {
+                participantMap.set('empty', this.buildResourceRules(rule, existing, modelManager));
+            }
+        } else {
+            // Tansaction based
+            if ( participantMap.has(rule.getTransaction().getFullyQualifiedName()) ) {
+                participantMap.set(rule.getTransaction().getFullyQualifiedName() , this.extendResourceRules(rule));
+            } else {
+                participantMap.set(rule.getTransaction().getFullyQualifiedName(), this.buildResourceRules(rule, existing, modelManager));
+            }
+        }
+
+        return participantMap;
+    }
+
+    /**
+     * Build an object containing permissions for specified Resources
+     * @param {AclRule} rule The rule being considered
+     * @param {Map} existing The exiting rules under a Transaction for a Participant
+     * @param {M} modelManager the modenl manager
+     * @return {Promise} A promise that will be resolved when complete, or rejected
+     * with an error.
+     */
+    buildResourceRules(rule, existing, modelManager) {
+        let resourceRuleMap;
+        if (!existing) {
+            resourceRuleMap = new Map();
+        } else {
+            resourceRuleMap = existing;
+        }
+
+        // - Verb can be one of: 'CREATE' / 'READ' / 'UPDATE' / 'ALL' / 'DELETE'
+        let rules;
+        let verbs = rule.getVerbs();
+
+        if (verbs[0] === 'ALL') {
+            verbs = ['CREATE', 'READ', 'UPDATE', 'DELETE'];
+        }
+
+        // fqn = Type, something.*, or something.**
+        let fqn = rule.getNoun().getFullyQualifiedName();
+        if (ModelUtil.isWildcardName(fqn) || ModelUtil.isRecursiveWildcardName(fqn)) {
+            // Generic (wildcard) rule
+            // - If a resource rule exists for the rule verb, the wildcard new rule will be skipped
+            let resources = new Array();
+            modelManager.getAssetDeclarations(INCLUDE_SYSTEM)
+            .forEach((assetDec) => {
+                let asset = assetDec.getModelFile().getNamespace() + '.' + assetDec.getName();
+                if (this.isMatchingNs(asset, fqn)) {
+                    resources.push(asset);
+                }
+            });
+
+            resources.forEach((resource) => {
+                if (resourceRuleMap.has(resource)) {
+                    rules = resourceRuleMap.get(resource);
+                    verbs.forEach((verb) => {
+                        if(!rules[verb]) {
+                            rules[verb] = { generic: true, predicate: rule.getPredicate(), action: rule.getAction() };
+                        }
+                    });
+                    resourceRuleMap.set(resource, rules);
+                } else {
+                    rules = {};
+                    verbs.forEach((verb) => {
+                        rules[verb] = { generic: true, predicate: rule.getPredicate(), action: rule.getAction() };
+                    });
+                    resourceRuleMap.set(resource, rules);
+                }
+            });
+        } else {
+            // Rule applies to only this Resource
+            // - If a generic (wildcard) rule applies here, it will be overridden
+            // - If a specific rule applies here, with a conflicting verb, an error will be thrown
+            if (resourceRuleMap.has(fqn)) {
+                rules = resourceRuleMap.get(fqn);
+                verbs.forEach((verb) => {
+                    if(rules[verb] && rules[verb].generic === false) {
+                        throw new Error('Conflicting rule detected when processing rule: ', rule);
+                    } else {
+                        rules[verb] = { generic: false, predicate: rule.getPredicate(), action: rule.getAction() };
+                    }
+                });
+                resourceRuleMap.set(fqn, rules);
+            } else {
+                rules = {};
+                verbs.forEach((verb) => {
+                    rules[verb] = { generic: false, predicate: rule.getPredicate(), action: rule.getAction() };
+                });
+            }
+            resourceRuleMap.set(fqn, rules);
+        }
+
+        return resourceRuleMap;
+
+    }
+
+    /**
+     * match namespaces
+     * @param {String} assetNs asdf
+     * @param {String} fqn asf
+     * @return {boolean} true false
+     */
+    isMatchingNs(assetNs, fqn) {
+
+        let ns = ModelUtil.getNamespace(fqn);
+
+        if (ModelUtil.isWildcardName(fqn) && assetNs === ns) {
+            // matching namespace
+        } else if (ModelUtil.isRecursiveWildcardName(fqn) && (assetNs + '.').startsWith(ns + '.')) {
+            // matching recursive namespace
+        } else if (ModelUtil.isRecursiveWildcardName(fqn) && !ns) {
+            // matching root recursive namespace
+        } else {
+            // does not match
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
      * Initialize the context for use.
      * @param {Object} [options] The options to use.
      * @param {string} [options.function] The name of the currently executing runtime method.
@@ -554,6 +825,10 @@ class Context {
                 }
             })
             .then(() => {
+                return this.findRules(this.businessNetworkDefinition, options);
+            })
+            .then((ruleMap) => {
+                this.ruleMap = ruleMap;
                 if (options.function === 'init') {
                     // No point loading the participant as no participants exist!
                     LOG.debug(method, 'Not loading current participant as processing deployment');
@@ -745,6 +1020,17 @@ class Context {
             throw new Error('must call initialize before calling this function');
         }
         return this.businessNetworkDefinition.getIntrospector();
+    }
+
+    /**
+     * Get the Rules.
+     * @return {Map} The rule map.
+     */
+    getRuleMap() {
+        if (!this.ruleMap) {
+            throw new Error('must call initialize before calling this function');
+        }
+        return this.ruleMap;
     }
 
     /**

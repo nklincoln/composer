@@ -39,6 +39,7 @@ class AccessController {
         this.context = context;
         this.participant = null;
         this.transaction = null;
+        this.aclRuleMap = null;
         LOG.exit(method);
     }
 
@@ -89,15 +90,14 @@ class AccessController {
         LOG.entry(method, resource.getFullyQualifiedIdentifier(), access);
         // Check to see if a participant has been set. If not, then ACL
         // enforcement is not enabled.
-        let participant = this.participant;
-        if (!participant) {
+        if (!this.participant) {
             LOG.debug(method, 'No participant');
             LOG.exit(method);
             return Promise.resolve();
         }
 
         // Grab the transaction. Does not matter if this is null.
-        let transaction = this.transaction;
+        let transaction = this.transaction === null ? 'empty' :  this.transaction;
 
         // Check to see if an ACL file was supplied. If not, then ACL
         // enforcement is not enabled.
@@ -108,41 +108,75 @@ class AccessController {
             return Promise.resolve();
         }
 
-        // Filter the list of ACL rules into ones that it could be.
-        let aclRules = aclManager.getAclRules();
-        let filteredAclRules = aclRules.filter((aclRule) => {
-            return this.matchRule(resource, access, participant, transaction, aclRule);
-        });
+        let participantKey = this.participant.getNamespace() + '.' + this.participant.getType();
+        let resourceKey = resource.getNamespace() + '.' + resource.getType();
 
-        // Iterate over the ACL rules in order, but stop at the first rule
-        // that permits the action.
-        return filteredAclRules.reduce((promise, aclRule) => {
-            return promise.then((result) => {
+        //let transactionKey = this.participant.getNamespace() + '.' + this.participant.getType();
+        try {
+            // will throw if rule does not exist
+            let rule = this.context.getRuleMap().get(participantKey).get(transaction).get(resourceKey)[access];
+            return this.executeRule(this.participant, this.transaction, resource, rule, access);
+        } catch (err) {
+            // No rule, no access
+            throw new AccessException(resource, access, this.participant, transaction);
+        }
+    }
+
+    /**
+     * asdf
+     * @param {*} participant sadf
+     * @param {*} transaction asdf
+     * @param {*} resource asdf
+     * @param {*} rule asdf
+     * @param {*} access asdadsdasds slfigu h
+     * @returns {Promise} True/false
+     */
+    executeRule(participant, transaction, resource, rule, access) {
+        const method = 'executeRule';
+        return this.matchPredicate(resource, participant, transaction, rule.predicate)
+        .then((result) => {
+
+            // No, predicate not met.
+            if (!result) {
+                LOG.debug(method, 'Predicate does not match');
+                LOG.exit(method, false);
+                return false;
+            }
+
+            // Yes, predicate met, is this an allow or deny rule?
+            if (rule.action === 'ALLOW') {
+                LOG.exit(method, true);
+                return true;
+            }
+
+            // This must be an explicit deny rule, so throw.
+            let e = new AccessException(resource, access, participant, transaction);
+            LOG.error(method, e);
+            throw e;
+
+        });
+    }
+
+    /**
+     * Check permission for the passed scenario
+     * @param {Resource} asset The Asset being considered
+     * @param {string} access The access type being considered (Create, Read, Update, Delete)
+     * @param {Resource} participant The Participant being considered
+     * @param {Resource} transaction The Transaction being considered (may be null)
+     * @return {Promise} A promise that will be resolved when complete, or rejected
+     */
+    isPermitted(asset, access, participant, transaction) {
+        const method = 'checkRule';
+        LOG.entry(method, asset, access, participant, transaction);
+        return this.context.businessNetworkDefinition.getAclManager().getAclRules().reduce((promiseChain, aclRule) => {
+            return promiseChain.then((result) => {
+                // If previous result was true, pass all subsequent checks
                 if (result) {
                     return result;
                 }
-                LOG.debug(method, 'Processing rule', aclRule);
-                let value = this.checkRule(resource, access, participant, transaction, aclRule);
-                LOG.debug(method, 'Processed rule', value);
-                return value;
+                return this.checkRule(asset, access, participant, transaction, aclRule);
             });
-        }, Promise.resolve(false))
-            .then((result) => {
-
-                // If a ACL rule permitted the action, return.
-                if (result) {
-                    LOG.exit(method);
-                    return;
-                }
-
-                // Otherwise no ACL rule permitted the action.
-                throw new AccessException(resource, access, participant, transaction);
-
-            })
-            .catch((error) => {
-                LOG.error(method, error);
-                throw error;
-            });
+        }, Promise.resolve(false));
     }
 
     /**
