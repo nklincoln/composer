@@ -17,7 +17,6 @@
 const Logger = require('composer-common').Logger;
 const LOG = Logger.getLog('NodeUtils');
 
-
 /**
  * Set of utilities.
  */
@@ -28,28 +27,35 @@ class NodeUtils {
      *
      * @static
      * @param {any} iterator the chaincode iterator
+     * @param {boolean} batchMode x
      * @returns {promise} a promise that is resolved with the results or rejected or error
      */
-    static async getAllResults(iterator) {
+    static async getAllResults(iterator, batchMode = false) {
         const method = 'getAllResults';
         LOG.entry(method, iterator);
         const t0 = Date.now();
-
+        let batchTime = Date.now();
         let results = [];
-        let logResults = [];
         let res = {done: false};
         while (!res.done) {
-            res = await iterator.next();  //TODO: should we catch an error or just let it flow up the stack
+            if (!batchMode) {
+                res = await iterator.next();
+            } else {
+                const t1 = Date.now();
+                res = iterator.nextSync();
+                LOG.verbose('@PERF ' + method, 'BATCH MODE processing Total (ms) duration: ' + (Date.now() - t1).toFixed(2));
+            }
             if (res && res.value && res.value.value) {
                 let val = res.value.value.toString('utf8');
                 if (val.length > 0) {
                     results.push(JSON.parse(val));
-                    logResults.push(val);
                 }
             }
             if (res && res.done) {
                 try {
+                    LOG.verbose('@PERF ' + method, 'BATCH MODE remaining records processed Total (ms) duration: ' + (Date.now() - batchTime).toFixed(2));
                     await iterator.close();
+
                 }
                 catch(err) {
                     // log the fact the close had a problem, but that
@@ -57,9 +63,16 @@ class NodeUtils {
                     const warnMsg = 'Failure to close iterator. ' + err;
                     LOG.warn(warnMsg);
                 }
-                LOG.exit(method, logResults);
+                LOG.exit(method);
                 LOG.verbose('@PERF ' + method, 'Total (ms) duration: ' + (Date.now() - t0).toFixed(2));
                 return results;
+            }
+            if (res && res.needMore && batchMode) {
+                LOG.verbose('@PERF ' + method, 'BATCH MODE 100 records parsed Total (ms) duration: ' + (Date.now() - batchTime).toFixed(2));
+                const t1 = Date.now();
+                await iterator.loadNext();
+                batchTime = Date.now();
+                LOG.verbose('@PERF ' + method, 'BATCH MODE loadnext Total (ms) duration: ' + (Date.now() - t1).toFixed(2));
             }
         }
     }
@@ -97,7 +110,7 @@ class NodeUtils {
                     LOG.warn(warnMsg);
                 }
                 LOG.exit(method, logResults);
-                LOG.verbose('@PERF ' + method, 'Total (ms) duration: ' + (Date.now() - t0).toFixed(2));
+                LOG.verbose('@PERF ', 'Total (ms) duration for '+method+': ' + (Date.now() - t0));
                 return results;
             }
         }

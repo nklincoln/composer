@@ -117,7 +117,7 @@ class CompiledQueryBundle {
      * @return {Promise} A promise that is resolved with the results of the
      * query, or rejected with an error.
      */
-    executeInternal(dataService, compiledQuery, parameters) {
+    async executeInternal(dataService, compiledQuery, parameters) {
         const method = 'executeInternal';
         LOG.entry(method, dataService, compiledQuery, parameters);
 
@@ -128,11 +128,12 @@ class CompiledQueryBundle {
         const compiledQueryString = compiledQuery.generator(parameters);
 
         // Execute the compiled query string.
-        return dataService.executeQuery(compiledQueryString)
-            .then((result) => {
-                LOG.exit(method, result);
-                return result;
-            });
+        const t0 = Date.now();
+        const result = await dataService.executeQuery(compiledQueryString);
+
+        LOG.verbose(method, '@PERF Total (ms) duration: ' + (Date.now() - t0).toFixed(2));
+        LOG.exit(method, result);
+        return result;
     }
 
 }

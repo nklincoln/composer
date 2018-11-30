@@ -289,9 +289,6 @@ class Logger {
      * @private
      */
     verbose(method,msg, data) {
-        if (!(this.include && this.logLevel >= LOG_LEVEL_VERBOSE)) {
-            return;
-        }
         const length = arguments.length;
         const args = new Array(length);
         for (let i = 0; i < length; i++) {

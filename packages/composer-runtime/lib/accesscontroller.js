@@ -96,7 +96,7 @@ class AccessController {
         if (!participant) {
             LOG.debug(method, 'No participant');
             LOG.exit(method);
-            LOG.verbose('@PERF ' + method, 'Total (ms) duration: ' + (Date.now() - t0).toFixed(2));
+            LOG.debug(method, '@PERF Total (ms) duration: ' + (Date.now() - t0));
             return Promise.resolve();
         }
 
@@ -109,7 +109,7 @@ class AccessController {
         if (!aclManager.getAclFile()) {
             LOG.debug(method, 'No ACL file');
             LOG.exit(method);
-            LOG.verbose('@PERF ' + method, 'Total (ms) duration: ' + (Date.now() - t0).toFixed(2));
+            LOG.debug(method, '@PERF Total (ms) duration: ' + (Date.now() - t0));
             return Promise.resolve();
         }
 
@@ -138,7 +138,7 @@ class AccessController {
                 // If a ACL rule permitted the action, return.
                 if (result) {
                     LOG.exit(method);
-                    LOG.verbose('@PERF ' + method, 'Total (ms) duration: ' + (Date.now() - t0).toFixed(2));
+                    LOG.debug(method, '@PERF Total (ms) duration: ' + (Date.now() - t0));
                     return;
                 }
 
@@ -148,7 +148,7 @@ class AccessController {
             })
             .catch((error) => {
                 LOG.error(method, error);
-                LOG.verbose('@PERF ' + method, 'Total (ms) duration: ' + (Date.now() - t0).toFixed(2));
+                LOG.debug(method, '@PERF Total (ms) duration: ' + (Date.now() - t0));
                 throw error;
             });
     }

@@ -260,15 +260,16 @@ class Engine {
      * @return {Promise} A promise that will be resolved when complete, or rejected
      * with an error.
      */
-    async invoke(context, fcn, args) {
+    async invoke(context, fcn, args, txid) {
         const method = 'invoke';
-        LOG.entry(method, context, fcn, args);
+        const t0 = Date.now();
+        LOG.entry(method, context, fcn, args, txid);
         if (!this[fcn] || fcn.match(/^_/)) {
             LOG.error(method, 'Unsupported function', fcn, args);
             throw new Error(util.format('Unsupported function "%s" with arguments "%j"', fcn, args));
         }
         LOG.debug(method, 'Initializing context');
-        await context.initialize({ function: fcn, arguments: args,  container: this.getContainer() });
+        await context.initialize({ function: fcn, arguments: args,  container: this.getContainer(), txid: txid });
         try {
             await context.transactionStart(false);
             LOG.debug(method, 'Calling engine function', fcn);
@@ -277,11 +278,13 @@ class Engine {
             await context.transactionCommit();
             await context.transactionEnd();
             LOG.exit(method, result);
+            LOG.verbose(method, '@PERF [' + txid + ']Total (ms) duration : ' + (Date.now() - t0));
             return result;
         } catch (error) {
             await context.transactionRollback();
             await context.transactionEnd();
             LOG.error(method, 'Caught error, rethrowing', error);
+            LOG.verbose(method, '@PERF [' + txid + '] Total (ms) duration : ' + (Date.now() - t0));
             throw error;
         }
     }
@@ -294,15 +297,16 @@ class Engine {
      * @return {Promise} A promise that will be resolved when complete, or rejected
      * with an error.
      */
-    async query(context, fcn, args) {
+    async query(context, fcn, args, txid) {
         const method = 'query';
+        const t0 = Date.now();
         LOG.entry(method, context, fcn, args);
         if (!this[fcn] || fcn.match(/^_/)) {
             LOG.error(method, 'Unsupported function', fcn, args);
             throw new Error(util.format('Unsupported function "%s" with arguments "%j"', fcn, args));
         }
         LOG.debug(method, 'Initializing context');
-        await context.initialize({ function: fcn, arguments: args, container: this.getContainer() });
+        await context.initialize({ function: fcn, arguments: args, container: this.getContainer(), txid: txid });
         try {
             await context.transactionStart(true);
             LOG.debug(method, 'Calling engine function', fcn);
@@ -311,11 +315,13 @@ class Engine {
             await context.transactionCommit();
             await context.transactionEnd();
             LOG.exit(method, result);
+            LOG.verbose(method, '@PERF [' + txid + ']Total (ms) duration: ' + (Date.now() - t0));
             return result;
         } catch (error) {
             await context.transactionRollback();
             await context.transactionEnd();
             LOG.error(method, 'Caught error, rethrowing', error);
+            LOG.verbose(method, '@PERF [' + txid + '] Total (ms) duration: ' + (Date.now() - t0));
             throw error;
         }
     }

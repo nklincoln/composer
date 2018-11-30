@@ -127,6 +127,7 @@ class Context {
         this.function = options.function || this.function;
         this.arguments = options.arguments || this.arguments;
         this.container = options.container;
+        this.txid = options.txid;
 
         LOG.debug(method, 'Loading sysregistries collection', options.sysregistries);
         this.sysregistries = options.sysregistries || await this.getDataService().getCollection('$sysregistries', true);

@@ -44,9 +44,9 @@ class NodeLoggingService extends LoggingService {
         let logCFG = await this.getLoggerCfg();
         Logger.setLoggerCfg(logCFG, true);
 
-        Logger.setCallBack(function(logLevel) {
+        Logger.setCallBack((logLevel) => {
             const timestamp = new Date().toISOString();
-            const shortTxId = stub.getTxID().substring(0, 8);
+            const shortTxId = this.stub.getTxID().substring(0, 8);
             return `${timestamp} [${shortTxId}] ${logLevel.toUpperCase().padEnd(8)} `;
         });
 
@@ -183,6 +183,9 @@ class NodeLoggingService extends LoggingService {
             break;
         case 'debug':
             debugString='composer[debug]:*';
+            break;
+        case 'verbose':
+            debugString='composer[verbose]:*';
             break;
         default:
             debugString='composer[warn]:*';
