@@ -83,6 +83,17 @@ describe('EngineTransactions', () => {
         event MyEvent {
 
         }
+
+        @returns(MyAsset)
+        @readOnly
+        transaction MyTransactionThatReturnsAsset {
+            o String value
+        }
+        @returns(MyAsset[])
+        @readOnly
+        transaction MyTransactionThatReturnsAssetArray {
+            o String value
+        }
         @returns(MyConcept)
         transaction MyTransactionThatReturnsConcept {
             o String value
@@ -243,7 +254,7 @@ describe('EngineTransactions', () => {
             sinon.assert.calledOnce(mockTransactionRegistry.add);
             sinon.assert.calledWith(mockTransactionRegistry.add, sinon.match(transaction => transaction.getFullyQualifiedIdentifier() === 'org.acme.MyTransaction#TX_1'), { noTest: true });
             sinon.assert.calledOnce(mockHistorian.add);
-            sinon.assert.calledWith(mockHistorian.add, sinon.match(historianRecord => historianRecord.getFullyQualifiedIdentifier() === 'org.hyperledger.composer.system.HistorianRecord#TX_1'), { noTest: true });
+            sinon.assert.calledWith(mockHistorian.add, sinon.match(historianRecord => historianRecord.getFullyQualifiedIdentifier() === 'org.hyperledger.composer.system.HistorianRecord#TX_1'), { noTest: true, validate: false });
         });
 
         it('should execute a transaction that does not return a value and write to historian if explicitly requested', async () => {
@@ -265,7 +276,7 @@ describe('EngineTransactions', () => {
             sinon.assert.calledOnce(mockTransactionRegistry.add);
             sinon.assert.calledWith(mockTransactionRegistry.add, sinon.match(transaction => transaction.getFullyQualifiedIdentifier() === 'org.acme.MyTransaction#TX_1'), { noTest: true });
             sinon.assert.calledOnce(mockHistorian.add);
-            sinon.assert.calledWith(mockHistorian.add, sinon.match(historianRecord => historianRecord.getFullyQualifiedIdentifier() === 'org.hyperledger.composer.system.HistorianRecord#TX_1'), { noTest: true });
+            sinon.assert.calledWith(mockHistorian.add, sinon.match(historianRecord => historianRecord.getFullyQualifiedIdentifier() === 'org.hyperledger.composer.system.HistorianRecord#TX_1'), { noTest: true, validate: false });
         });
 
         it('should not write to historian if disabled', async () => {
@@ -306,7 +317,7 @@ describe('EngineTransactions', () => {
             sinon.assert.calledOnce(mockTransactionRegistry.add);
             sinon.assert.calledWith(mockTransactionRegistry.add, sinon.match(transaction => transaction.getFullyQualifiedIdentifier() === 'org.acme.MyTransactionThatReturnsString#TX_1'), { noTest: true });
             sinon.assert.calledOnce(mockHistorian.add);
-            sinon.assert.calledWith(mockHistorian.add, sinon.match(historianRecord => historianRecord.getFullyQualifiedIdentifier() === 'org.hyperledger.composer.system.HistorianRecord#TX_1'), { noTest: true });
+            sinon.assert.calledWith(mockHistorian.add, sinon.match(historianRecord => historianRecord.getFullyQualifiedIdentifier() === 'org.hyperledger.composer.system.HistorianRecord#TX_1'), { noTest: true, validate: false });
         });
 
         it('should throw if the transaction cannot be added to the transaction registry', async () => {
@@ -588,6 +599,18 @@ describe('EngineTransactions', () => {
                 value: 'hello world'
             });
         });
+
+        it('should handle an Asset return value', () => {
+            const transaction = factory.newTransaction('org.acme', 'MyTransactionThatReturnsAsset');
+            const asset = factory.newResource('org.acme', 'MyAsset','001');
+            asset.value = 'hello world';
+            engine._processReturnValues(mockContext, transaction, [asset]).should.deep.equal({
+                $class: 'org.acme.MyAsset',
+                assetId: '001',
+                value: 'hello world'
+            });
+        });
+
 
         it('should throw if a return value required but return value was not provided', () => {
             const transaction = factory.newTransaction('org.acme', 'MyTransactionThatReturnsString');
