@@ -517,7 +517,7 @@ describe('BusinessNetworkDefinition', () => {
             decorator.should.be.an.instanceOf(ReturnsDecorator);
         });
 
-        it.only('should install the decorator processor for @readonly', () => {
+        it('should install the decorator processor for @readonly', () => {
             const bnd = new BusinessNetworkDefinition('id@1.0.0', 'description', null, 'readme');
             const modelManager = bnd.getModelManager();
             modelManager.addModelFile(`

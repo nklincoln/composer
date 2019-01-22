@@ -25,7 +25,7 @@ const TypeNotFoundException = require('../lib/typenotfoundexception');
 const should = require('chai').should();
 const sinon = require('sinon');
 
-describe('Serializer', () => {
+describe.only('Serializer', () => {
 
     let sandbox;
     let factory;

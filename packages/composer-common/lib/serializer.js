@@ -113,8 +113,10 @@ class Serializer {
             throw new Error(Globalize.formatMessage('serializer-tojson-notcobject'));
         }
 
+         // Assign options
+        options = options ? Object.assign({}, this.defaultOptions, options) : this.defaultOptions;
 
-        if (resource.$original && (options && options.useOriginal)) {
+        if (resource.$original && !resource.$isDirty) {
             //conditional validation
             if (options.validate && !resource.$validated){
                 const parameters = this.validationParameters(resource);
@@ -123,13 +125,11 @@ class Serializer {
                 classDeclaration.accept(validator, parameters);
             }
 
+            console.log('SHORTCUT')
             const result = resource.$original;
             delete result.$original;
             return result;
         }
-
-        // Assign options
-        options = options ? Object.assign({}, this.defaultOptions, options) : this.defaultOptions;
 
         const parameters = this.validationParameters(resource);
         const classDeclaration = this.modelManager.getType( resource.getFullyQualifiedType() );
@@ -225,8 +225,35 @@ class Serializer {
         resource.$original = jsonObject;
         Object.defineProperty(resource, '$original', { enumerable: false });
 
+        resource.$isDirty = false;
+        Object.defineProperty(resource, '$isDirty', { enumerable: false });
 
-        return resource;
+        // Create an observable object to return here as we want to monitor for resource changes
+        const validator = function (parent) {
+            this.apply = function (target, property, receiver){
+                return Reflect.apply(target, property, receiver);
+            };
+            this.get = function (target, property){
+                const targetProp = target[property];
+                if(targetProp instanceof Function && !(target instanceof Array)){
+                    return targetProp.bind(target);
+                } else {
+                    return typeof targetProp === 'object' ? new Proxy(targetProp, new validator(resource)) : targetProp;
+                }
+
+            };
+            this.set = function (target, property, receiver){
+                parent.$isDirty = true;
+                return Reflect.set(target, property, receiver);
+            };
+            this.deleteProperty = function (target, property, receiver){
+                parent.$isDirty = true;
+                return Reflect.deleteProperty(target, property, receiver);
+            };
+        };
+
+        const proxy = new Proxy(resource, new validator(resource));
+        return proxy;
     }
 }
 
